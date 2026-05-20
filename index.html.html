@@ -659,10 +659,48 @@ tbody td b{font-weight:700}
 .cpc-mk.sel{box-shadow:0 0 0 4px rgba(45,122,95,.4),0 2px 6px rgba(0,0,0,.3)}
 .leaflet-tooltip{background:white;border:1px solid var(--border);color:var(--text);font-family:'Outfit',sans-serif;font-size:11px;padding:7px 10px;border-radius:7px;box-shadow:0 2px 10px rgba(0,0,0,.12)}
 .leaflet-tooltip b{color:var(--sf-green);font-weight:700}
+/* ACCESS GATE */
+#sf-gate{position:fixed;inset:0;z-index:99999;background:linear-gradient(135deg,#0d3d2e 0%,#1a5c47 50%,#2d7a5f 100%);display:flex;align-items:center;justify-content:center;padding:20px;font-family:'Outfit',-apple-system,sans-serif}
+#sf-gate.hidden{display:none}
+#sf-gate .gate-card{background:white;border-radius:18px;padding:40px 36px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
+#sf-gate .gate-stripe{height:4px;background:#d4e85a;border-radius:2px;width:60px;margin:0 auto 22px}
+#sf-gate .gate-logo{font-size:22px;font-weight:800;color:#0d3d2e;letter-spacing:-.5px;margin-bottom:6px}
+#sf-gate .gate-title{font-size:15px;font-weight:600;color:#1a2530;margin-bottom:8px}
+#sf-gate .gate-sub{font-size:13px;color:#6b7785;line-height:1.5;margin-bottom:26px}
+#sf-gate .gate-form{display:flex;flex-direction:column;gap:12px}
+#sf-gate .gate-label{font-size:11px;font-weight:600;color:#6b7785;text-transform:uppercase;letter-spacing:.6px;text-align:left}
+#sf-gate .gate-input{padding:14px 16px;border:1.5px solid #e3e6eb;border-radius:10px;font-size:14px;font-family:inherit;color:#1a2530;outline:none;transition:.15s;width:100%}
+#sf-gate .gate-input:focus{border-color:#2d7a5f;box-shadow:0 0 0 3px rgba(45,122,95,.12)}
+#sf-gate .gate-btn{padding:14px;background:#0d3d2e;color:white;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;margin-top:6px}
+#sf-gate .gate-btn:hover{background:#1a5c47}
+#sf-gate .gate-btn:disabled{opacity:.5;cursor:not-allowed}
+#sf-gate .gate-error{font-size:12px;color:#e85a5a;background:rgba(232,90,90,.08);border:1px solid rgba(232,90,90,.2);padding:10px 12px;border-radius:8px;text-align:left;display:none}
+#sf-gate .gate-error.show{display:block}
+#sf-gate .gate-foot{margin-top:22px;font-size:11px;color:#9aa3b0;line-height:1.5}
+#sf-gate .gate-foot strong{color:#0d3d2e}
+.app-locked{display:none !important}
 </style>
 </head><body>
-<div class="top-strip"></div>
-<div class="app">
+
+<!-- ACCESS GATE -->
+<div id="sf-gate">
+  <div class="gate-card">
+    <div class="gate-stripe"></div>
+    <div class="gate-logo">Shadowfax</div>
+    <div class="gate-title">NCR CPC Network Designer</div>
+    <div class="gate-sub">This is an internal planning tool containing confidential network data. Access is restricted to Shadowfax employees.</div>
+    <div class="gate-form">
+      <div class="gate-label">Work Email</div>
+      <input type="email" id="sf-gate-email" class="gate-input" placeholder="yourname@shadowfax.in" autocomplete="email" autofocus>
+      <div id="sf-gate-error" class="gate-error">Please use your @shadowfax.in work email to access this tool.</div>
+      <button id="sf-gate-btn" class="gate-btn">Continue</button>
+    </div>
+    <div class="gate-foot">By continuing, you confirm you are authorised to view <strong>Shadowfax</strong> internal operations data. Do not share this link externally.</div>
+  </div>
+</div>
+
+<div class="top-strip app-content" style="display:none"></div>
+<div class="app app-content" style="display:none">
 
 <aside class="sidebar">
   <div class="brand-block">
@@ -3952,63 +3990,202 @@ function updateExportBarStats(){
 
 // updateExportBarStats is called from render() below
 
-// ============ OPEN IN GOOGLE MAPS ============
+// ============ OPEN IN MAP (NEW TAB) ============
+// Generates a self-contained HTML map page in a new tab with all currently-visible
+// pickup points, CPC centroids, SC marker, catchment circles, and feeder lines.
+// Bypasses Google Maps URL waypoint limits — uses Leaflet + OpenStreetMap tiles.
 window.openInGoogleMaps = ()=>{
   const cpcs = getCpcs();
   const [scLat, scLng] = DATA.bamnoli;
-  const scName = (state.scName || 'SC').replace(/\s+/g,'+');
+  const scName = state.scName || 'SC';
+  const cityCode = state.cityCode || 'NCR';
+  const isAll = state.mapCpcFilter === 'all';
+  const bucketFilter = state.mapBucketFilter;
 
-  let url;
-
-  if(state.mapCpcFilter === 'all'){
-    // All CPCs view: show SC center + all CPC markers
-    // Use Google Maps "search" URL with multiple markers via My Maps style
-    // Best practical option: place the SC as origin, generate a directions URL with all CPCs as waypoints
-    // But Maps directions URL is capped at ~10 waypoints. Better: use the search URL centered on SC.
-    //
-    // We'll use the "dir/" pattern which shows SC + all CPC centroids on one map view:
-    //   https://www.google.com/maps/dir/{lat1,lng1}/{lat2,lng2}/...
-    // If too many CPCs (>9 waypoints), fall back to centered search.
-    const points = [`${scLat},${scLng}`];
-    cpcs.forEach(c=>{ points.push(`${c.lat},${c.lng}`); });
-
-    if(points.length <= 10){
-      // Use directions view - shows all points on one map
-      url = 'https://www.google.com/maps/dir/' + points.join('/');
-    } else {
-      // Too many for directions, use centered map with SC as the anchor
-      // Computed center = average of all CPCs
-      const avgLat = cpcs.reduce((s,c)=>s+c.lat,0)/cpcs.length;
-      const avgLng = cpcs.reduce((s,c)=>s+c.lng,0)/cpcs.length;
-      url = `https://www.google.com/maps/@${avgLat},${avgLng},10z`;
-    }
+  // Build the data payload — only the CPCs / clients that are currently visible
+  let payloadCpcs;
+  let viewTitle;
+  if(isAll){
+    payloadCpcs = cpcs.map((c,i)=>({...c, _origIdx:i}));
+    viewTitle = `${cityCode} network — ${cpcs.length} CPCs`;
   } else {
-    // Specific CPC view: SC + that CPC + all client pickup points
-    const cpcIdx = parseInt(state.mapCpcFilter);
-    const cpc = cpcs[cpcIdx];
-    if(!cpc) return;
-
-    // Build directions URL: SC -> CPC -> all client pickups
-    // Cap at ~10 waypoints (Google Maps limit)
-    // Best: SC as origin, CPC as destination, sample of clients as waypoints
-    const points = [`${scLat},${scLng}`, `${cpc.lat},${cpc.lng}`];
-
-    // Add up to 8 client points (Google Maps max 10 total)
-    const clients = cpc.clients.slice(0, 8);
-    clients.forEach(cl=>{ points.push(`${cl.lat},${cl.lng}`); });
-
-    if(cpc.clients.length > 8){
-      // If more clients, use a centered map instead so all dots are visible
-      // Google Maps "@" URL: centered view with zoom
-      url = `https://www.google.com/maps/@${cpc.lat},${cpc.lng},12z`;
-    } else {
-      // Use directions to show SC + CPC + client points
-      url = 'https://www.google.com/maps/dir/' + points.join('/');
-    }
+    const idx = parseInt(state.mapCpcFilter);
+    payloadCpcs = [{...cpcs[idx], _origIdx:idx}];
+    viewTitle = `${cityCode} · CPC-${String(idx+1).padStart(2,'0')} · ${cpcs[idx].area_name}`;
   }
 
-  // Open in new tab
-  window.open(url, '_blank', 'noopener');
+  // Per-CPC color palette (same as main module)
+  const colors = ['#2d7a5f','#9a7ad9','#e8845a','#4a90e2','#d4a72d','#e85a5a','#4ab8b8','#7a8c5a','#b87dd9','#5a7a8c','#c08a4e','#5a8cc0','#8c5a8c','#5ac08a','#a0a05a'];
+  const bucketColors = {'SDD/PPMP':'#9a7ad9','Air NDD':'#e8845a','Zonal/Prime NDD':'#2d7a5f'};
+
+  // Compute average lat/lng for initial center
+  let allPts = [[scLat,scLng]];
+  payloadCpcs.forEach(c=>{
+    allPts.push([c.lat,c.lng]);
+    c.clients.forEach(cl=>{ if(bucketFilter[cl.bucket]) allPts.push([cl.lat,cl.lng]); });
+  });
+
+  // Build the new tab HTML
+  const dataJson = JSON.stringify({
+    bamnoli:[scLat,scLng],
+    scName: scName,
+    cityCode: cityCode,
+    viewTitle: viewTitle,
+    isAll: isAll,
+    bucketFilter: bucketFilter,
+    cpcs: payloadCpcs,
+    colors: colors,
+    bucketColors: bucketColors,
+    allPts: allPts
+  });
+
+  const pageHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${viewTitle.replace(/</g,'&lt;')} · CPC Network Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;font-family:-apple-system,'Outfit',Segoe UI,sans-serif;background:#0d3d2e;color:#1a2530}
+.topbar{background:#0d3d2e;color:white;padding:14px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;border-bottom:3px solid #cfe83a}
+.topbar h1{font-size:17px;font-weight:700;letter-spacing:.3px}
+.topbar .meta{font-size:12px;color:rgba(255,255,255,.7);font-family:'JetBrains Mono',monospace}
+.topbar .spacer{flex:1}
+.topbar .stats{display:flex;gap:14px;flex-wrap:wrap}
+.topbar .stat{font-size:11px;background:rgba(255,255,255,.08);padding:5px 11px;border-radius:5px;font-family:'JetBrains Mono',monospace;color:#cfe83a;font-weight:600}
+.btn-gmaps{background:#cfe83a;color:#0d3d2e;border:none;padding:7px 14px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn-gmaps:hover{background:#e8ff5c}
+.btn-gmaps svg{width:13px;height:13px}
+#map{height:calc(100vh - 60px);width:100%}
+.legend{position:absolute;bottom:18px;left:18px;background:white;border-radius:8px;padding:11px 14px;box-shadow:0 2px 12px rgba(0,0,0,.18);font-size:11.5px;z-index:1000;line-height:1.7;max-width:240px}
+.legend .ttl{font-weight:700;font-size:11px;color:#6b7785;text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px}
+.legend .row{display:flex;align-items:center;gap:7px}
+.legend .swatch{width:11px;height:11px;border-radius:50%;flex-shrink:0;border:1.5px solid white;box-shadow:0 0 0 1px rgba(0,0,0,.1)}
+.bam-mk{background:#0d3d2e;color:white;border-radius:8px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;border:3px solid white;box-shadow:0 3px 10px rgba(0,0,0,.4);font-family:'JetBrains Mono',monospace;letter-spacing:.5px}
+.cpc-mk{border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:white;border:3px solid white;box-shadow:0 3px 8px rgba(0,0,0,.35);font-family:'JetBrains Mono',monospace}
+.leaflet-tooltip{background:white;border:1px solid #e3e6eb;color:#1a2530;font-size:12px;padding:8px 11px;border-radius:7px;box-shadow:0 2px 12px rgba(0,0,0,.15);font-family:'Outfit',sans-serif}
+.leaflet-tooltip b{color:#2d7a5f;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>${viewTitle.replace(/</g,'&lt;')}</h1>
+  <span class="meta">${scName} · ${scLat.toFixed(4)}, ${scLng.toFixed(4)}</span>
+  <div class="spacer"></div>
+  <div class="stats" id="stats"></div>
+  <a class="btn-gmaps" id="open-gmaps" target="_blank" rel="noopener">
+    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M 11,2 L 2,2 L 2,11 M 6,2 L 12,2 L 12,8 M 6,8 L 12,2"/></svg>
+    Open in Google Maps
+  </a>
+</div>
+<div id="map"></div>
+<div class="legend" id="legend"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<script>
+const D = ${dataJson};
+const map = L.map('map',{zoomControl:true,attributionControl:true}).setView([28.55,77.05],10);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OpenStreetMap, © CartoDB'}).addTo(map);
+
+// SC marker
+const scIcon = L.divIcon({html:'<div class="bam-mk">SC</div>',className:'',iconSize:[38,38]});
+L.marker(D.bamnoli,{icon:scIcon,zIndexOffset:1000}).bindTooltip('<b>'+D.scName+'</b><br>'+D.bamnoli[0].toFixed(4)+', '+D.bamnoli[1].toFixed(4),{direction:'top'}).addTo(map);
+
+let totalPickups = 0, totalAdl = 0;
+const bounds = [D.bamnoli];
+
+D.cpcs.forEach((cpc, listIdx)=>{
+  const color = D.colors[cpc._origIdx % D.colors.length];
+
+  // Catchment circle
+  L.circle([cpc.lat,cpc.lng],{
+    radius:cpc.max_radius_km*1000, color:color, weight:1.5,
+    fillColor:color, fillOpacity:0.08, dashArray:'5 5'
+  }).addTo(map);
+
+  // Client pickup dots (filtered by bucket)
+  cpc.clients.forEach(cl=>{
+    if(!D.bucketFilter[cl.bucket]) return;
+    const dotColor = D.bucketColors[cl.bucket] || color;
+    L.circleMarker([cl.lat,cl.lng],{
+      radius:5, color:'white', weight:1, fillColor:dotColor, fillOpacity:0.92
+    }).bindTooltip('<b>'+cl.name+'</b><br>'+cl.vertical+'<br>Slot: '+cl.pickup_slot+'<br>ADL: '+cl.adl+' · '+cl.dist_km+'km<br>CPC-'+String(cpc._origIdx+1).padStart(2,'0'),{direction:'top'}).addTo(map);
+    bounds.push([cl.lat,cl.lng]);
+    totalPickups++;
+    totalAdl += (cl.adl||0);
+  });
+
+  // When viewing single CPC, draw thin lines from CPC to each client
+  if(!D.isAll){
+    cpc.clients.forEach(cl=>{
+      if(!D.bucketFilter[cl.bucket]) return;
+      L.polyline([[cpc.lat,cpc.lng],[cl.lat,cl.lng]],{
+        color:D.bucketColors[cl.bucket]||color, weight:0.8, opacity:0.5
+      }).addTo(map);
+    });
+  }
+
+  // Feeder line from CPC to SC
+  L.polyline([[cpc.lat,cpc.lng],D.bamnoli],{
+    color:color, weight: D.isAll?2:3.5, opacity: D.isAll?0.5:0.9, dashArray:'10 5'
+  }).addTo(map);
+
+  // CPC marker
+  const icon = L.divIcon({
+    html:'<div class="cpc-mk" style="background:'+color+'">'+(cpc._origIdx+1)+'</div>',
+    className:'',iconSize:[34,34]
+  });
+  L.marker([cpc.lat,cpc.lng],{icon,zIndexOffset:500})
+    .bindTooltip('<b>CPC-'+String(cpc._origIdx+1).padStart(2,'0')+' · '+cpc.area_name+'</b><br>'+cpc.pickups+' pickups · '+cpc.total_adl.toLocaleString()+' ADL<br>Feeder: '+cpc.feeder_km+'km',{direction:'top'}).addTo(map);
+  bounds.push([cpc.lat,cpc.lng]);
+});
+
+// Fit bounds to all visible points
+if(bounds.length > 1){
+  map.fitBounds(L.latLngBounds(bounds), {padding:[50,50], maxZoom:14});
+}
+
+// Stats in topbar
+const cpcCount = D.cpcs.length;
+document.getElementById('stats').innerHTML =
+  '<span class="stat">' + cpcCount + ' CPC' + (cpcCount!==1?'s':'') + '</span>' +
+  '<span class="stat">' + totalPickups + ' pickups</span>' +
+  '<span class="stat">' + totalAdl.toLocaleString() + ' ADL</span>';
+
+// Legend
+let legendHtml = '<div class="ttl">Legend</div>';
+legendHtml += '<div class="row"><span class="swatch" style="background:#0d3d2e;border-radius:3px"></span>Sort Center (' + D.scName + ')</div>';
+D.cpcs.forEach(c=>{
+  const col = D.colors[c._origIdx % D.colors.length];
+  legendHtml += '<div class="row"><span class="swatch" style="background:'+col+'"></span>CPC-'+String(c._origIdx+1).padStart(2,'0')+' · '+c.area_name+'</div>';
+});
+legendHtml += '<div class="ttl" style="margin-top:8px">Pickup type</div>';
+if(D.bucketFilter['SDD/PPMP']) legendHtml += '<div class="row"><span class="swatch" style="background:#9a7ad9"></span>SDD / PPMP</div>';
+if(D.bucketFilter['Air NDD']) legendHtml += '<div class="row"><span class="swatch" style="background:#e8845a"></span>Air NDD</div>';
+if(D.bucketFilter['Zonal/Prime NDD']) legendHtml += '<div class="row"><span class="swatch" style="background:#2d7a5f"></span>Zonal / Prime NDD</div>';
+document.getElementById('legend').innerHTML = legendHtml;
+
+// Google Maps fallback link (centered on bounds)
+let cLat = D.bamnoli[0], cLng = D.bamnoli[1];
+if(bounds.length > 1){
+  cLat = bounds.reduce((s,p)=>s+p[0],0)/bounds.length;
+  cLng = bounds.reduce((s,p)=>s+p[1],0)/bounds.length;
+}
+document.getElementById('open-gmaps').href = 'https://www.google.com/maps/@'+cLat+','+cLng+',12z';
+<\/script>
+</body>
+</html>`;
+
+  // Open the new tab and write the HTML into it
+  const newTab = window.open('', '_blank');
+  if(!newTab){
+    alert('Pop-up blocked. Please allow pop-ups for this site to open the map in a new tab.');
+    return;
+  }
+  newTab.document.open();
+  newTab.document.write(pageHtml);
+  newTab.document.close();
 };
 
 // Keep the button label in sync with the filter state
@@ -4017,11 +4194,11 @@ function updateGmapBtnLabel(){
   if(!lbl) return;
   if(state.mapCpcFilter === 'all'){
     const n = getCpcs().length;
-    lbl.textContent = `Open ${n}-CPC view in Google Maps`;
+    lbl.textContent = `Open ${n}-CPC view in new tab`;
   } else {
     const cpc = getCpcs()[parseInt(state.mapCpcFilter)];
     if(cpc){
-      lbl.textContent = `Open CPC-${String(parseInt(state.mapCpcFilter)+1).padStart(2,'0')} in Google Maps`;
+      lbl.textContent = `Open CPC-${String(parseInt(state.mapCpcFilter)+1).padStart(2,'0')} in new tab`;
     }
   }
 }
@@ -4043,6 +4220,71 @@ setInterval(updateClock,1000);updateClock();
 // Init designer step states
 setTimeout(()=>{ if(typeof updateDesignerStepStates === 'function') updateDesignerStepStates(); }, 100);
 render();
+</script>
+
+<script>
+/* ACCESS GATE LOGIC */
+(function(){
+  var ALLOWED_DOMAIN = '@shadowfax.in';
+  var STORAGE_KEY = 'sf_ncr_access_v1';
+
+  function reveal(){
+    var gate = document.getElementById('sf-gate');
+    if(gate) gate.classList.add('hidden');
+    var hidden = document.querySelectorAll('.app-content');
+    hidden.forEach(function(el){ el.style.display = ''; });
+    // Re-trigger any map sizing that depends on layout being visible
+    setTimeout(function(){
+      window.dispatchEvent(new Event('resize'));
+    }, 50);
+  }
+
+  function tryEmail(email){
+    email = (email || '').trim().toLowerCase();
+    var emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    var domainOk = email.endsWith(ALLOWED_DOMAIN);
+    if(emailOk && domainOk){
+      try {
+        sessionStorage.setItem(STORAGE_KEY, email);
+      } catch(e){}
+      return true;
+    }
+    return false;
+  }
+
+  // Check existing session
+  try {
+    var stored = sessionStorage.getItem(STORAGE_KEY);
+    if(stored && stored.toLowerCase().endsWith(ALLOWED_DOMAIN)){
+      reveal();
+      return;
+    }
+  } catch(e){}
+
+  var input = document.getElementById('sf-gate-email');
+  var btn = document.getElementById('sf-gate-btn');
+  var errEl = document.getElementById('sf-gate-error');
+
+  function attempt(){
+    var val = input.value;
+    if(tryEmail(val)){
+      errEl.classList.remove('show');
+      reveal();
+    } else {
+      errEl.classList.add('show');
+      input.focus();
+      input.select();
+    }
+  }
+
+  btn.addEventListener('click', attempt);
+  input.addEventListener('keydown', function(e){
+    if(e.key === 'Enter'){ e.preventDefault(); attempt(); }
+  });
+  input.addEventListener('input', function(){
+    if(errEl.classList.contains('show')) errEl.classList.remove('show');
+  });
+})();
 </script>
 </body>
 </html>
